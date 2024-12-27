@@ -1,5 +1,7 @@
 const express = require('express');
-var cors = require('cors')
+var cors = require('cors');
+const jwt = require('jsonwebtoken');
+const nodemailer = require('nodemailer');
 require('dotenv').config();
 const { MongoClient, ServerApiVersion } = require('mongodb');
 
@@ -23,10 +25,6 @@ const client = new MongoClient(uri, {
 
 async function run() {
     try {
-        // Connect the client to the server	(optional starting in v4.7)
-        await client.connect();
-
-
         const database = client.db("booknest");
         const userCollection = database.collection("users");
         const bookCollection = database.collection("allBooks");
@@ -34,20 +32,113 @@ async function run() {
 
         app.post('/register', async (req, res) => {
             const newUser = req.body;
-            const result = await userCollection.insertOne(newUser);
-            if (result?.insertedId) {
-                res.status(201).json({
-                    success: true,
-                    message: 'User registered successfully!',
-                    userId: result.insertedId, // Return the ID of the inserted user
-                    user: newUser, // Return the newly registered user data
+            const query = { email: newUser?.email };
+            const userExist = await userCollection.findOne(query);
+
+            if (userExist?.isVerified) {
+                return res.status(409).json({
+                    status: 409,
+                    message: 'User already exists',
                 });
-            } else {
-                res.status(500).json({
-                    success: false,
-                    message: 'Failed to register the user. Please try again.',
+            };
+
+            // Create JWT for email verification (valid for 24 hours)
+            const token = jwt.sign({ email: newUser.email }, process.env.SECRET_KEY, { expiresIn: '24h' });
+            newUser.verificationToken = token;
+            newUser.isVerified = false;
+            newUser.role = 'USER';
+
+            const result = userExist
+                ? await userCollection.updateOne(query, { $set: { verificationToken: token } })
+                : await userCollection.insertOne(newUser);
+
+            // Send verification email
+            const verificationLink = `http://localhost:3000/verify/${token}`;
+            const transporter = nodemailer.createTransport({
+                service: 'Gmail', // Or your preferred email service
+                auth: {
+                    user: 'saditanzim@gmail.com',
+                    pass: process.env.APP_PASSWORD,
+                },
+            });
+
+            const mailOptions = {
+                from: 'saditanzim@gmail.com',
+                to: newUser.email,
+                subject: 'Verify Your Email',
+                html: `<p>Click the link below to verify your email:</p>
+               <a href="${verificationLink}">${verificationLink}</a>`,
+            };
+
+            transporter.sendMail(mailOptions, (err, info) => {
+                if (err) {
+                    return res.status(500).json({
+                        status: 500,
+                        message: 'Error sending verification email',
+                        error: err
+                    });
+                }
+
+                res.status(201).json({
+                    status: 201,
+                    message: 'User registered successfully. Please verify your email to complete the registration.',
+                    data: result,
+                });
+            });
+        });
+
+        // GET: Verify Email
+        app.get('/verify/:token', async (req, res) => {
+            const { token } = req.params;
+
+            const user = await userCollection.findOne({ verificationToken: token });
+
+            if (!user) {
+                return res.status(400).json({
+                    status: 400,
+                    message: 'Invalid or expired verification link',
                 });
             }
+
+            // Mark the user as verified
+            const result = await userCollection.updateOne(
+                { verificationToken: token },
+                { $set: { isVerified: true }, $unset: { verificationToken: '' } }
+            );
+
+            if (result?.modifiedCount) {
+                return res.status(200).json({
+                    status: 200,
+                    message: 'Email verified successfully. Registration complete.',
+                    result
+                });
+            } else {
+                return res.status(200).json({
+                    status: 409,
+                    message: 'Email not verified. Please try again',
+                    result
+                });
+            }
+        });
+
+        // LOGIN
+        app.post('/login', async (req, res) => {
+            const user = req?.body;
+            const query = { email: user?.email, password: user?.password };
+            const registeredUser = await userCollection.findOne(query);
+            if (registeredUser) {
+                if (registeredUser?.isVerified) {
+                    const token = jwt.sign({
+                        data: registeredUser?.email
+                    }, process.env.SECRET_KEY, { expiresIn: 60 * 60 });
+                    res.send({ success: true, user: registeredUser, token });
+                } else {
+                    res.status(401).send({ success: false, message: "User not verified" });
+                }
+            } else {
+                res.status(401).send({ success: false, message: "Invalid Email/Password" });
+            }
+
         });
 
         app.get('/books', async (req, res) => {
