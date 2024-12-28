@@ -8,12 +8,19 @@ const { Server } = require('socket.io');
 const http = require('http');
 
 const app = express();
-const port = process.env.PORT || 3000;
+const port = process.env.PORT || 4000;
 const server = http.createServer(app); // Create an HTTP server
-const io = new Server(server); // Initialize socket.io
+const io = new Server(server, {
+    cors: {
+        origin: ['http://localhost:3000'],
+        methods: ['GET', 'POST']
+    }
+}); // Initialize socket.io
 
 app.use(express.json());
-app.use(cors());
+app.use(cors({
+    origin: ['http://localhost:3000', 'https://booknest-client-wheat.vercel.app']
+}));
 
 
 const uri = `mongodb+srv://${process.env.DB_USERNAME}:${process.env.DB_PASSWORD}@cluster0.jcb8og7.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0`;
