@@ -4,9 +4,13 @@ const jwt = require('jsonwebtoken');
 const nodemailer = require('nodemailer');
 require('dotenv').config();
 const { MongoClient, ServerApiVersion } = require('mongodb');
+const { Server } = require('socket.io');
+const http = require('http');
 
 const app = express();
 const port = 3000;
+const server = http.createServer(app); // Create an HTTP server
+const io = new Server(server); // Initialize socket.io
 
 app.use(express.json());
 app.use(cors());
@@ -28,6 +32,15 @@ async function run() {
         const database = client.db("booknest");
         const userCollection = database.collection("users");
         const bookCollection = database.collection("allBooks");
+
+        io.on('connection', (socket) => {
+            console.log('A user connected:', socket.id);
+
+            // Handle disconnect
+            socket.on('disconnect', () => {
+                console.log('User disconnected:', socket.id);
+            });
+        });
 
 
         app.post('/register', async (req, res) => {
@@ -146,6 +159,12 @@ async function run() {
             newBookDetails.tags = newBookDetails?.tags.split(',').map(tag => tag.trim())
             const result = await bookCollection.insertOne(newBookDetails);
             if (result?.insertedId) {
+
+                io.emit('notification', {
+                    message: 'A new book has been added!',
+                    book: newBookDetails,
+                });
+
                 return res.status(201).json({
                     status: 201,
                     success: true,
@@ -183,6 +202,6 @@ app.get('/', (req, res) => {
     res.send('Hello World!')
 })
 
-app.listen(port, () => {
-    console.log(`Example app listening on port ${port}`)
-})
+server.listen(port, () => {
+    console.log(`Server running on http://localhost:${port}`);
+});
