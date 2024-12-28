@@ -141,13 +141,33 @@ async function run() {
 
         });
 
+        app.post('/add-book', async (req, res) => {
+            const newBookDetails = req?.body;
+            newBookDetails.tags = newBookDetails?.tags.split(',').map(tag => tag.trim())
+            const result = await bookCollection.insertOne(newBookDetails);
+            if (result?.insertedId) {
+                return res.status(201).json({
+                    status: 201,
+                    success: true,
+                    message: 'New book added successfully.',
+                    data: result
+                });
+            }
+            return res.status(500).json({
+                status: 500,
+                success: false,
+                message: 'Error in adding book',
+                error: err
+            });
+        })
+
         app.get('/books', async (req, res) => {
             const cursor = await bookCollection.find().toArray();
             res.status(201).json({
                 success: true,
                 data: cursor, // Return the newly registered user data
             });
-        })
+        });
 
         // Send a ping to confirm a successful connection
         await client.db("admin").command({ ping: 1 });
